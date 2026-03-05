@@ -17,7 +17,6 @@ SETTINGS_FILE = Path("episode_encoder_settings.json")
 import shutil
 
 def resolve_ffmpeg_tools():
-    # 1️⃣ If running as PyInstaller onefile build
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base_path = Path(sys._MEIPASS)
         ffmpeg_path = base_path / "ffmpeg.exe"
@@ -26,7 +25,6 @@ def resolve_ffmpeg_tools():
         if ffmpeg_path.exists() and ffprobe_path.exists():
             return str(ffmpeg_path), str(ffprobe_path)
 
-    # 2️⃣ Check next to the exe (onedir builds)
     exe_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
     ffmpeg_local = exe_dir / "ffmpeg.exe"
     ffprobe_local = exe_dir / "ffprobe.exe"
@@ -34,7 +32,6 @@ def resolve_ffmpeg_tools():
     if ffmpeg_local.exists() and ffprobe_local.exists():
         return str(ffmpeg_local), str(ffprobe_local)
 
-    # 3️⃣ Fallback to system PATH
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
 
@@ -1040,3 +1037,4 @@ class EpisodeEncoderApp(ctk.CTk):
 if __name__ == "__main__":
     app = EpisodeEncoderApp()
     app.mainloop()
+
