@@ -63,6 +63,45 @@ No installation required.
 
 ---
 
+## Run From Source
+
+If you prefer to run VisionSplit directly from the source code:
+
+### 1. Clone the repository and create environment (Conda Recommended)
+```
+# conda create -n VisionSplit python=3.13 (uncomment if using conda environment)
+# conda activate VisionSplit
+
+git clone https://github.com/VisionDepth/VisionSplit.git
+
+cd VisionSplit
+```
+### 2. Install Python dependencies
+```
+pip install -r requirements.txt
+```
+
+### 3. Install FFmpeg
+
+VisionSplit requires **FFmpeg** and **ffprobe** to be available on your system.
+
+Download FFmpeg from:  
+https://ffmpeg.org/download.html
+
+After installing, make sure `ffmpeg` and `ffprobe` are available in your system **PATH**.
+
+You can verify this by running:
+```
+ffmpeg -version
+```
+
+### 4. Run VisionSplit
+```
+python VisionSplit.py
+```
+The application window will launch.
+
+---
 
 ## Encoder Options
 
