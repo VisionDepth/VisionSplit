@@ -17,6 +17,7 @@ SETTINGS_FILE = Path("episode_encoder_settings.json")
 import shutil
 
 def resolve_ffmpeg_tools():
+    # 1️⃣ If running as PyInstaller onefile build
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base_path = Path(sys._MEIPASS)
         ffmpeg_path = base_path / "ffmpeg.exe"
@@ -25,6 +26,7 @@ def resolve_ffmpeg_tools():
         if ffmpeg_path.exists() and ffprobe_path.exists():
             return str(ffmpeg_path), str(ffprobe_path)
 
+    # 2️⃣ Check next to the exe (onedir builds)
     exe_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
     ffmpeg_local = exe_dir / "ffmpeg.exe"
     ffprobe_local = exe_dir / "ffprobe.exe"
@@ -32,6 +34,7 @@ def resolve_ffmpeg_tools():
     if ffmpeg_local.exists() and ffprobe_local.exists():
         return str(ffmpeg_local), str(ffprobe_local)
 
+    # 3️⃣ Fallback to system PATH
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
 
@@ -198,7 +201,7 @@ def build_ffmetadata_chapters(chapter_starts_ms: List[int], duration_ms: int, ti
 class EpisodeEncoderApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Episode Encoder")
+        self.title("VisionSplit - Split and Stitch")
         self.settings = load_settings()
 
         self.geometry(self.settings.get("window_geometry", "980x720"))
@@ -210,6 +213,7 @@ class EpisodeEncoderApp(ctk.CTk):
         self._worker_thread: Optional[threading.Thread] = None
         self._stop_flag = threading.Event()
         self._ui_queue: "queue.Queue[tuple]" = queue.Queue()
+        self.stitch_clips: List[str] = []
 
         self._build_ui()
         self.after(100, self._drain_ui_queue)
@@ -394,6 +398,26 @@ class EpisodeEncoderApp(ctk.CTk):
         enc.grid_columnconfigure(1, weight=1)
 
         # ----------------------------
+        # Clip stitcher
+        # ----------------------------
+        stitch_frame = ctk.CTkFrame(ts_frame)
+        stitch_frame.pack(fill="both", expand=False, padx=10, pady=(0, 10))
+
+        ctk.CTkLabel(stitch_frame, text="Clip stitcher", anchor="w").pack(fill="x", padx=10, pady=(10, 4))
+
+        stitch_btns = ctk.CTkFrame(stitch_frame)
+        stitch_btns.pack(fill="x", padx=10, pady=(0, 8))
+
+        ctk.CTkButton(stitch_btns, text="+ Add clips", width=90, command=self.add_stitch_clips).pack(side="left")
+        ctk.CTkButton(stitch_btns, text="Remove selected", width=120, command=self.remove_selected_stitch_clip).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(stitch_btns, text="Move up", width=80, command=self.move_stitch_clip_up).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(stitch_btns, text="Move down", width=90, command=self.move_stitch_clip_down).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(stitch_btns, text="Clear", width=70, command=self.clear_stitch_clips).pack(side="left", padx=(8, 0))
+
+        self.stitch_list = ctk.CTkTextbox(stitch_frame, wrap="none", height=140)
+        self.stitch_list.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # ----------------------------
         # Bottom: progress + buttons + log
         # ----------------------------
         bottom = ctk.CTkFrame(root)
@@ -404,6 +428,9 @@ class EpisodeEncoderApp(ctk.CTk):
 
         self.start_btn = ctk.CTkButton(btn_row, text="Start encode", command=self.start_encode)
         self.start_btn.pack(side="left")
+        
+        self.stitch_btn = ctk.CTkButton(btn_row, text="Start stitch", command=self.start_stitch)
+        self.stitch_btn.pack(side="left", padx=(10, 0))
 
         self.stop_btn = ctk.CTkButton(btn_row, text="Stop", fg_color="#aa0000", hover_color="#880000", command=self.stop_encode, state="disabled")
         self.stop_btn.pack(side="left", padx=(10, 0))
@@ -989,6 +1016,7 @@ class EpisodeEncoderApp(ctk.CTk):
 
     def _set_ui_running(self, running: bool):
         self.start_btn.configure(state="disabled" if running else "normal")
+        self.stitch_btn.configure(state="disabled" if running else "normal")
         self.stop_btn.configure(state="normal" if running else "disabled")
 
     # ----------------------------
@@ -1004,6 +1032,251 @@ class EpisodeEncoderApp(ctk.CTk):
         self.log_box.insert("end", msg + "\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
+
+    def _refresh_stitch_list(self):
+        self.stitch_list.delete("1.0", "end")
+        for i, path in enumerate(self.stitch_clips, start=1):
+            self.stitch_list.insert("end", f"{i:02d}. {path}\n")
+
+    def _get_selected_stitch_index(self) -> Optional[int]:
+        try:
+            idx = self.stitch_list.index("insert")
+            line_no = int(str(idx).split(".")[0])
+        except Exception:
+            return None
+        if 1 <= line_no <= len(self.stitch_clips):
+            return line_no - 1
+        return None
+
+    def add_stitch_clips(self):
+        filetypes = [("Video files", "*.mp4 *.mkv *.avi *.mov *.m4v *.wmv"), ("All files", "*.*")]
+        paths = filedialog.askopenfilenames(title="Select clips to stitch", filetypes=filetypes)
+        if not paths:
+            return
+        self.stitch_clips.extend(paths)
+        self._refresh_stitch_list()
+
+    def remove_selected_stitch_clip(self):
+        idx = self._get_selected_stitch_index()
+        if idx is None:
+            return
+        self.stitch_clips.pop(idx)
+        self._refresh_stitch_list()
+
+    def move_stitch_clip_up(self):
+        idx = self._get_selected_stitch_index()
+        if idx is None or idx <= 0:
+            return
+        self.stitch_clips[idx - 1], self.stitch_clips[idx] = self.stitch_clips[idx], self.stitch_clips[idx - 1]
+        self._refresh_stitch_list()
+
+    def move_stitch_clip_down(self):
+        idx = self._get_selected_stitch_index()
+        if idx is None or idx >= len(self.stitch_clips) - 1:
+            return
+        self.stitch_clips[idx + 1], self.stitch_clips[idx] = self.stitch_clips[idx], self.stitch_clips[idx + 1]
+        self._refresh_stitch_list()
+
+    def clear_stitch_clips(self):
+        if not self.stitch_clips:
+            return
+        ok = messagebox.askyesno("Clear clips?", f"Clear all {len(self.stitch_clips)} clips from the stitch list?")
+        if not ok:
+            return
+        self.stitch_clips = []
+        self._refresh_stitch_list()
+        
+    def start_stitch(self):
+        if not have_ffmpeg():
+            messagebox.showerror("ffmpeg missing", "ffmpeg/ffprobe not found in PATH.\nInstall ffmpeg and restart.")
+            return
+
+        out_dir = (self.out_entry.get() or "").strip()
+        if not out_dir or not os.path.isdir(out_dir):
+            messagebox.showerror("Output", "Pick a valid output folder.")
+            return
+
+        if len(self.stitch_clips) < 2:
+            messagebox.showerror("Clips", "Add at least 2 clips to stitch.")
+            return
+
+        missing = [p for p in self.stitch_clips if not os.path.exists(p)]
+        if missing:
+            messagebox.showerror("Missing files", f"Some clips no longer exist:\n\n{missing[0]}")
+            return
+
+        container = self.container_opt.get()
+        vcodec = self.vcodec_opt.get()
+        preset = self.preset_opt.get()
+        acodec = self.acodec_opt.get()
+        abitrate = (self.abitrate_entry.get() or "192k").strip()
+
+        try:
+            crf = int((self.crf_entry.get() or "20").strip())
+        except Exception:
+            messagebox.showerror("CRF", "CRF must be a number, like 18, 20, 23.")
+            return
+
+        out_path = os.path.join(out_dir, f"stitched_output.{container}")
+
+        self._stop_flag.clear()
+        self._set_ui_running(True)
+        self._log_clear()
+        self.progress.set(0)
+        self.status_lbl.configure(text="Preparing stitch job...")
+
+        self._worker_thread = threading.Thread(
+            target=self._run_stitch_worker,
+            args=(self.stitch_clips[:], out_path, container, vcodec, preset, crf, acodec, abitrate),
+            daemon=True
+        )
+        self._worker_thread.start()
+        
+        
+    def _run_stitch_worker(
+        self,
+        clips: List[str],
+        out_path: str,
+        container: str,
+        vcodec: str,
+        preset: str,
+        crf: int,
+        acodec: str,
+        abitrate: str
+    ):
+        ffmpeg_path, ffprobe_path = get_ffmpeg_tools()
+        if not ffmpeg_path:
+            self._ui_queue.put(("done", False, "ffmpeg not found.", None))
+            return
+
+        concat_list_path = os.path.join(os.path.dirname(out_path), "concat_list.txt")
+
+        try:
+            with open(concat_list_path, "w", encoding="utf-8") as f:
+                for clip in clips:
+                    safe = clip.replace("\\", "/").replace("'", "'\\''")
+                    f.write(f"file '{safe}'\n")
+        except Exception as e:
+            self._ui_queue.put(("done", False, f"Failed to create concat list: {e}", None))
+            return
+
+        fast_mode = (vcodec == "copy" and acodec == "copy")
+
+        if fast_mode:
+            cmd = [
+                ffmpeg_path, "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", concat_list_path,
+                "-c", "copy",
+                out_path
+            ]
+        else:
+            cmd = [
+                ffmpeg_path, "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", concat_list_path,
+                "-c:v", vcodec,
+            ]
+
+            if vcodec in ("h264_nvenc", "hevc_nvenc"):
+                preset_map = {
+                    "ultrafast": "p1",
+                    "superfast": "p2",
+                    "veryfast": "p3",
+                    "faster": "p4",
+                    "fast": "p4",
+                    "medium": "p5",
+                    "slow": "p6",
+                    "slower": "p7",
+                    "veryslow": "p7",
+                }
+                nv_preset = preset_map.get(str(preset).lower(), "p5")
+                cmd += [
+                    "-preset", nv_preset,
+                    "-rc", "vbr",
+                    "-cq", str(crf),
+                    "-b:v", "0",
+                    "-spatial_aq", "1",
+                    "-aq-strength", "8",
+                ]
+            elif vcodec != "copy":
+                cmd += ["-preset", preset, "-crf", str(crf)]
+            else:
+                cmd += ["-c:v", "copy"]
+
+            if acodec == "copy":
+                cmd += ["-c:a", "copy"]
+            else:
+                cmd += ["-c:a", acodec, "-b:a", abitrate]
+
+            cmd += [out_path]
+
+        self._ui_queue.put(("log", f"Stitching {len(clips)} clip(s)..."))
+        self._ui_queue.put(("log", f"Output: {out_path}"))
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+        except Exception as e:
+            try:
+                if os.path.exists(concat_list_path):
+                    os.remove(concat_list_path)
+            except Exception:
+                pass
+            self._ui_queue.put(("done", False, f"Failed to launch ffmpeg: {e}", None))
+            return
+
+        try:
+            while True:
+                if self._stop_flag.is_set():
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+
+                line = proc.stdout.readline() if proc.stdout else ""
+                if not line:
+                    if proc.poll() is not None:
+                        break
+                    continue
+
+                line = line.strip()
+                if line:
+                    self._ui_queue.put(("log", line))
+
+            rc = proc.wait()
+
+            try:
+                if os.path.exists(concat_list_path):
+                    os.remove(concat_list_path)
+            except Exception:
+                pass
+
+            if rc != 0:
+                if self._stop_flag.is_set():
+                    self._ui_queue.put(("done", False, "Stopped by user.", None))
+                else:
+                    self._ui_queue.put(("done", False, f"ffmpeg stitch failed (code {rc}).", None))
+                return
+
+            self._ui_queue.put(("progress", 1.0, "Stitch complete."))
+            self._ui_queue.put(("done", True, f"Done. Stitched {len(clips)} clips.", None))
+
+        except Exception as e:
+            try:
+                if os.path.exists(concat_list_path):
+                    os.remove(concat_list_path)
+            except Exception:
+                pass
+            self._ui_queue.put(("done", False, f"Error during stitch: {e}", None))
 
     # ----------------------------
     # Close
@@ -1037,4 +1310,3 @@ class EpisodeEncoderApp(ctk.CTk):
 if __name__ == "__main__":
     app = EpisodeEncoderApp()
     app.mainloop()
-
