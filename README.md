@@ -1,7 +1,7 @@
 <h1 align="center">VisionSplit</h1>
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/fee33480-9b70-45ae-ba1d-f427e358746e" width="520">
+  <img src="https://github.com/user-attachments/assets/7be8afdb-6264-41a9-8e09-624577f19252" width="520">
 </p>
 
 <p align="center">
@@ -26,10 +26,12 @@ No manual trimming. No complicated editing. Just fast, clean splits.
 
 - Split a single video file into multiple episodes
 - Import chapter timestamps directly from disc rips
-- Fast stream copy mode (no re-encoding)
-- Optional re-encoding with configurable codecs
+- Fast stream copy mode for quick splitting without re-encoding
+- Optional re-encoding with configurable codec settings
+- Stitch multiple clips together into one merged video
+- Reorder clips before stitching
 - MKV and MP4 output support
-- Automatic episode naming (S01E01 format)
+- Automatic episode naming in S01E01 format
 - Subtitle track support
 - Simple GUI built with CustomTkinter
 - FFmpeg bundled with the release
@@ -38,14 +40,25 @@ No manual trimming. No complicated editing. Just fast, clean splits.
 
 ## Typical Workflow
 
+### Episode Splitting
 1. Rip the disc using MakeMKV  
 2. Open VisionSplit  
-3. Load the disc file  
+3. Load the source video  
 4. Click **Chapters** to import chapter timestamps  
-5. Adjust timestamps to match each episode start and delete unnecessary ones  
-6. Click **Start Encode**
+5. Adjust timestamps so each one matches an episode start  
+6. Remove any unnecessary timestamps  
+7. Click **Start Encode**
 
-Episodes are generated automatically.
+VisionSplit will automatically generate separate episode files.
+
+### Clip Stitching
+1. Open VisionSplit  
+2. Add the clips you want to combine  
+3. Arrange them in the order you want  
+4. Choose your output folder and encoder settings  
+5. Click **Start Stitch**
+
+VisionSplit will export the clips as a single merged file.
 
 ---
 
